@@ -16,7 +16,7 @@ import inspect
 import json
 from pathlib import Path
 
-from pydantic_ai import Agent
+from pydantic_ai import Agent, DeferredToolRequests, DeferredToolResults
 from pydantic_ai.exceptions import ModelHTTPError
 from fastmcp import Client
 from pydantic_ai.mcp import MCPToolset, StdioTransport
@@ -35,12 +35,14 @@ INSTRUCTIONS = """\
 - 用語集に見つからないことは、推測で断定せず「用語集にはない」と伝える。
 - 回答の最後に、関係する回（第N回）を示す。
 - 宿題の答えそのものは書かず、考え方のヒントで導く。
+- 学習記録の保存を頼まれたら save_learning_log を使う。承認されなければ保存しない。
 """
 
 # モデルは実行時に渡す（テストではAPIを呼ばない TestModel に差し替えるため）
-agent = Agent(instructions=INSTRUCTIONS)
+agent = Agent(instructions=INSTRUCTIONS, output_type=[str, DeferredToolRequests])
 agent.tool_plain(tools.search_glossary)
 agent.tool_plain(tools.get_lecture_summary)
+agent.tool_plain(requires_approval=True)(tools.save_learning_log)
 
 # TODO(第3回 演習): tools.py に make_quiz を作り、ここで登録しよう
 
@@ -128,7 +130,38 @@ def main() -> None:
     if args.mcp:
         print("[tools] MCP サーバー（app/mcp_servers.json）")
     try:
-        result = target.run_sync(args.question, model=build_model())
+        model = build_model()
+        result = target.run_sync(args.question, model=model)
+
+        for _ in range(5):
+            if not isinstance(result.output, DeferredToolRequests):
+                break
+
+            requests = result.output
+            if requests.calls:
+                raise SystemExit("未対応の外部ツール実行が要求されました")
+            if not requests.approvals:
+                raise SystemExit("承認対象がありません")
+
+            decisions = DeferredToolResults()
+
+            for call in requests.approvals:
+                print(f"\n[承認待ち] {call.tool_name}")
+                print(f"引数: {call.args}")
+                answer = input("実行を承認しますか？ [y/N]: ").strip().lower()
+
+                decisions.approvals[call.tool_call_id] = (
+                    call.tool_name == "save_learning_log"
+                    and answer in ("y", "yes")
+                )
+
+            result = target.run_sync(
+                message_history=result.all_messages(),
+                deferred_tool_results=decisions,
+                model=model,
+            )
+        else:
+            raise SystemExit("承認待ちが繰り返されたため停止しました")
     except ModelHTTPError as e:
         print(api_error_message(e.status_code, str(e.body)[:200]))
         raise SystemExit(1)
