@@ -301,15 +301,19 @@ def compare_labels(a: dict[str, dict], b: dict[str, dict], name_a: str, name_b: 
 
 
 # ---------------------------------------------------------------- 回答の生成（宿題・実装）
-def generate_answers(cases: list[dict], wait: float = 1.0) -> list[dict]:
+def generate_answers(cases: list[dict], output_path: Path, wait: float = 15.0) -> list[dict]:
     """評価セットの各質問を自分のエージェント（app.agent）に投げ、回答を埋める。"""
     from app.agent import agent, build_model
 
     model = build_model()
     print(f"回答を生成中 {len(cases)} 件 ", end="", flush=True)
     for case in cases:
+        if case.get("answer"):
+            print("s", end="", flush=True)
+            continue
         result = agent.run_sync(case["question"], model=model)
         case["answer"] = str(result.output)
+        write_jsonl(output_path, cases)
         print(".", end="", flush=True)
         time.sleep(wait)
     print()
@@ -343,7 +347,7 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.generate:
         try:
-            cases = generate_answers(cases)
+            cases = generate_answers(cases, args.cases, wait=args.wait if args.wait > 0 else 15.0)
         except ModelHTTPError as e:
             print(api_error_message(e.status_code, str(e.body)[:200]))
             raise SystemExit(1)

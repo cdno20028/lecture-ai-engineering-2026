@@ -9,6 +9,7 @@ from functools import cache
 from pathlib import Path
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+LEARNING_LOG_DIR = Path(__file__).resolve().parent.parent / "learning_log"
 MAX_RESULTS = 3
 
 
@@ -77,3 +78,27 @@ def get_lecture_summary(lecture: int) -> str:
         available = sorted(p.stem for p in (DATA_DIR / "lectures").glob("*.md"))
         return f"第{lecture}回の要点はまだありません。用意されている回: {', '.join(available)}"
     return path.read_text(encoding="utf-8")
+
+
+def save_learning_log(topic: str, content: str) -> str:
+    """学習内容を learning_log/ フォルダに保存する。
+
+    保存は取り消しにくい操作なので、必ず利用者の承認後に実行する。
+    topic は学習テーマ、content は記録する内容。
+    """
+    from datetime import datetime
+    from uuid import uuid4
+    from zoneinfo import ZoneInfo
+
+    now = datetime.now(ZoneInfo("Asia/Tokyo"))
+    log_dir = LEARNING_LOG_DIR
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    filename = f"{now:%Y%m%d_%H%M%S}_{uuid4().hex[:8]}.md"
+    path = log_dir / filename
+    text = f"# {topic}\n\n記録日時：{now:%Y/%m/%d %H:%M:%S} JST\n\n{content}\n"
+
+    with path.open("x", encoding="utf-8") as f:
+        f.write(text)
+
+    return f"保存しました: {path.relative_to(log_dir.parent)}"
