@@ -38,11 +38,40 @@ def test_base_tools_are_registered_and_called(monkeypatch):
 
 
 def test_material_result_reaches_the_model(monkeypatch):
-    hit = {"page_id": "lec02-main-p052", "lecture": 2, "page": 52, "content": "元の重みは固定"}
+    hit = {"page_id": "lec02-main-p052", "document_id": "lec02-main", "lecture": 2, "page": 52, "content": "元の重みは固定"}
     monkeypatch.setattr("app.retrieval.search", lambda *args, **kwargs: [hit])
     model = TestModel(call_tools=["search_materials"])
     with agent.override(model=model):
         result = agent.run_sync("RAGとは？")
     returns = _parts(result, ToolReturnPart)
     assert returns and returns[0].tool_name == "search_materials"
-    assert json.loads(returns[0].content)["results"] == [hit]
+    results = json.loads(returns[0].content)["results"]
+
+    # 元の検索結果が保持されている
+    assert results[0] == {**hit, "retrieval_type": "vector"}
+
+    # 検索ページの前後1ページを取得している
+    ids = [row["page_id"] for row in results]
+    assert set(ids) == {
+        "lec02-main-p051",
+        "lec02-main-p052",
+        "lec02-main-p053",
+    }
+
+    # 重複や別資料の混入がない
+    assert len(ids) == len(set(ids))
+    assert all(
+        row["document_id"] == "lec02-main"
+        for row in results
+    )
+
+    # 追加取得ページの種類と取得元を検証
+    neighbors = [
+        row for row in results
+        if row["retrieval_type"] == "neighbor"
+    ]
+    assert len(neighbors) == 2
+    assert all(
+        row["source_page_id"] == "lec02-main-p052"
+        for row in neighbors
+    )
